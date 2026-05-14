@@ -69,12 +69,33 @@ final class HotkeyManager: ObservableObject {
         }
     }
 
-    fileprivate func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+
+    private static let cgCallback: CGEventTapCallBack = { _, type, event, info in
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            NSLog("AgentDictate: tap disabled (\(type.rawValue)) — re-enabling")
+            if let info {
+                let manager = Unmanaged<HotkeyManager>.fromOpaque(info).takeUnretainedValue()
+                DispatchQueue.main.async { _ = manager.install() }
+            }
+            return Unmanaged.passUnretained(event)
+        }
+        guard let info else { return Unmanaged.passUnretained(event) }
+        let manager = Unmanaged<HotkeyManager>.fromOpaque(info).takeUnretainedValue()
         let code = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
         let flags = event.flags.intersection([.maskCommand, .maskAlternate, .maskControl, .maskShift])
-        let matches = code == keyCode && flags.contains(modifierFlags)
+        let mgrKeyCode = manager.keyCode
+        let mgrFlags = manager.modifierFlags
+        let matches = code == mgrKeyCode && flags.contains(mgrFlags) && !mgrFlags.isEmpty
+        if matches {
+            NSLog("AgentDictate: hotkey MATCH type=\(type.rawValue) keyCode=\(code) flags=\(flags.rawValue)")
+        }
         guard matches else { return Unmanaged.passUnretained(event) }
 
+        DispatchQueue.main.async { manager.fire(type: type) }
+        return nil
+    }
+
+    fileprivate func fire(type: CGEventType) {
         switch type {
         case .keyDown where !keyDown:
             keyDown = true
@@ -82,20 +103,11 @@ final class HotkeyManager: ObservableObject {
             case .pushToTalk: onPress()
             case .toggle: onPress()
             }
-            return nil
         case .keyUp where keyDown:
             keyDown = false
             if mode == .pushToTalk { onRelease() }
-            return nil
         default:
-            return Unmanaged.passUnretained(event)
+            break
         }
-    }
-
-    private static let cgCallback: CGEventTapCallBack = { _, type, event, info in
-        guard let info else { return Unmanaged.passUnretained(event) }
-        let manager = Unmanaged<HotkeyManager>.fromOpaque(info).takeUnretainedValue()
-        let result = DispatchQueue.main.sync { manager.handle(type: type, event: event) }
-        return result
     }
 }
