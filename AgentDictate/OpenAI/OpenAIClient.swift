@@ -13,14 +13,25 @@ struct OpenAIClient {
 
     init(
         transport: HTTPTransport = URLSession.shared,
-        baseURL: URL = URL(string: "https://api.openai.com/v1")!,
-        apiKeyProvider: @escaping () throws -> String? = {
-            try KeychainStore().get(KeychainStore.openAIKeyAccount)
-        }
+        baseURL: URL? = nil,
+        apiKeyProvider: (() throws -> String?)? = nil
     ) {
         self.transport = transport
-        self.baseURL = baseURL
-        self.apiKeyProvider = apiKeyProvider
+        let env = ProcessInfo.processInfo.environment
+        if let provided = baseURL {
+            self.baseURL = provided
+        } else if let override = env["AGENTDICTATE_OPENAI_BASE_URL"], let u = URL(string: override) {
+            self.baseURL = u
+        } else {
+            self.baseURL = URL(string: "https://api.openai.com/v1")!
+        }
+        if let provider = apiKeyProvider {
+            self.apiKeyProvider = provider
+        } else if let envKey = env["AGENTDICTATE_OPENAI_API_KEY"], !envKey.isEmpty {
+            self.apiKeyProvider = { envKey }
+        } else {
+            self.apiKeyProvider = { try KeychainStore().get(KeychainStore.openAIKeyAccount) }
+        }
     }
 
     func transcribe(wav: Data, model: String = "whisper-1", language: String? = nil) async throws -> String {
