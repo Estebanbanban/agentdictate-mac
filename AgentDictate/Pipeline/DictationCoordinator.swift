@@ -2,6 +2,22 @@ import Foundation
 import SwiftUI
 
 @MainActor
+protocol AudioRecording: AnyObject {
+    func start() throws
+    func stop() -> Data
+}
+
+extension AudioRecorder: AudioRecording {}
+
+protocol TextPasting {
+    func copyAndPaste(_ text: String)
+}
+
+struct PasteboardPaster: TextPasting {
+    func copyAndPaste(_ text: String) { Paster.copyAndPaste(text) }
+}
+
+@MainActor
 final class DictationCoordinator: ObservableObject {
 
     enum State: Equatable {
@@ -13,20 +29,23 @@ final class DictationCoordinator: ObservableObject {
 
     @Published private(set) var state: State = .idle
 
-    let recorder: AudioRecorder
+    let recorder: AudioRecording
     let replacements: ReplacementsStore
     let client: OpenAIClient
+    let paster: TextPasting
     var settings: DictationSettings
 
     init(
-        recorder: AudioRecorder? = nil,
+        recorder: AudioRecording? = nil,
         replacements: ReplacementsStore,
         client: OpenAIClient = OpenAIClient(),
+        paster: TextPasting = PasteboardPaster(),
         settings: DictationSettings = DictationSettings()
     ) {
         self.recorder = recorder ?? AudioRecorder()
         self.replacements = replacements
         self.client = client
+        self.paster = paster
         self.settings = settings
     }
 
@@ -59,7 +78,7 @@ final class DictationCoordinator: ObservableObject {
                 : raw
             let final = ReplacementsEngine.apply(cleaned, rules: replacements.rules)
             await MainActor.run {
-                Paster.copyAndPaste(final)
+                self.paster.copyAndPaste(final)
                 self.state = .idle
             }
         } catch {

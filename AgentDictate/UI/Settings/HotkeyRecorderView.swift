@@ -5,6 +5,7 @@ struct HotkeyRecorderView: View {
     @Binding var binding: HotkeyBinding
     @State private var recording = false
     @State private var monitor: Any?
+    @State private var warning: String?
 
     var body: some View {
         HStack(spacing: 10) {
@@ -35,8 +36,13 @@ struct HotkeyRecorderView: View {
                 Button("Cancel") { stopRecording() }
                     .buttonStyle(.borderless)
             } else {
-                Button("Reset") { binding = .default }
+                Button("Reset") { binding = .default; warning = nil }
                     .buttonStyle(.borderless)
+            }
+            if let warning {
+                Text(warning)
+                    .font(CortanaTheme.Font.body(11))
+                    .foregroundStyle(CortanaTheme.Color.danger)
             }
         }
         .onDisappear { stopRecording() }
@@ -65,6 +71,11 @@ struct HotkeyRecorderView: View {
         if modifiers.contains(.option) { flags.insert(.maskAlternate) }
         if modifiers.contains(.shift) { flags.insert(.maskShift) }
         if modifiers.contains(.command) { flags.insert(.maskCommand) }
+        if flags.isEmpty {
+            warning = "Add at least one modifier (⌃ ⌥ ⌘ ⇧)"
+            return
+        }
+        warning = nil
         binding = HotkeyBinding(keyCode: UInt16(event.keyCode), modifiers: flags.rawValue)
         stopRecording()
     }

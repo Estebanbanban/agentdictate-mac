@@ -2,6 +2,7 @@ import SwiftUI
 
 struct DictationTab: View {
     @EnvironmentObject var appSettings: AppSettingsStore
+    @EnvironmentObject var hotkey: HotkeyManager
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -16,6 +17,7 @@ struct DictationTab: View {
                             .frame(width: 100, alignment: .leading)
                         HotkeyRecorderView(binding: $appSettings.hotkeyBinding)
                     }
+                    hotkeyStatusRow
                     Picker("Hotkey mode", selection: $appSettings.hotkeyMode) {
                         Text("Push-to-talk").tag(HotkeyMode.pushToTalk)
                         Text("Toggle").tag(HotkeyMode.toggle)
@@ -57,6 +59,46 @@ struct DictationTab: View {
                 }
             }
             Spacer()
+        }
+    }
+
+    private var hotkeyStatusRow: some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(statusColor)
+                .frame(width: 8, height: 8)
+                .cortanaGlow(color: statusColor, radius: 4, opacity: 0.8)
+            Text(statusLabel)
+                .font(CortanaTheme.Font.body(11))
+                .foregroundStyle(CortanaTheme.Color.textDim)
+            Spacer()
+            if hotkey.status == .permissionDenied {
+                Button("Open Input Monitoring") {
+                    if let url = URL(string: SystemSettingsPane.inputMonitoring.urlString) {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .buttonStyle(.borderless)
+            } else if hotkey.status != .active {
+                Button("Reinstall") { hotkey.install() }
+                    .buttonStyle(.borderless)
+            }
+        }
+    }
+
+    private var statusColor: Color {
+        switch hotkey.status {
+        case .active: return CortanaTheme.Color.cyan
+        case .permissionDenied: return CortanaTheme.Color.danger
+        case .uninstalled: return CortanaTheme.Color.textDim
+        }
+    }
+
+    private var statusLabel: String {
+        switch hotkey.status {
+        case .active: return "Hotkey tap ACTIVE"
+        case .permissionDenied: return "Hotkey tap BLOCKED — grant Input Monitoring then relaunch"
+        case .uninstalled: return "Hotkey tap not installed"
         }
     }
 }

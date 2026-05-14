@@ -1,110 +1,116 @@
-#!/usr/bin/env swift
 // Plain-Swift test runner — no XCTest. Mirrors the XCTest suite so we can
 // run unit tests without full Xcode installed (XCTest ships with Xcode).
-// Run: swift tests-no-xcode/run-tests.swift
-
 import Foundation
 import CoreGraphics
 
-// Re-import production sources by compiling them together.
-// Build runner usage: swift -I AgentDictate ... is awkward; instead use the
-// scripts/run-tests.sh wrapper which globs source paths.
+private final class TestStats {
+    var passed = 0
+    var failed = 0
+}
 
-var failed = 0
-var passed = 0
-let start = Date()
+private let stats = TestStats()
+private let start = Date()
 
-func check(_ name: String, _ condition: @autoclosure () -> Bool, _ msg: String = "") {
+private func check(_ name: String, _ condition: @autoclosure () -> Bool, _ msg: String = "") {
     if condition() {
-        passed += 1
+        stats.passed += 1
         print("  ✓ \(name)")
     } else {
-        failed += 1
+        stats.failed += 1
         print("  ✗ \(name) \(msg)")
     }
 }
 
-func describe(_ group: String, _ block: () -> Void) {
-    print("\n\(group)")
-    block()
+private func group(_ name: String) {
+    print("\n\(name)")
 }
 
-// ──────────────── ReplacementsEngine ────────────────
+// ──────────────── shared mocks ────────────────
 
-describe("ReplacementsEngine") {
+private final class StubTransport: HTTPTransport, @unchecked Sendable {
+    var nextData: Data = Data()
+    var nextStatus: Int = 200
+    var lastRequest: URLRequest?
+
+    func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+        lastRequest = request
+        let response = HTTPURLResponse(
+            url: request.url!, statusCode: nextStatus, httpVersion: nil, headerFields: nil
+        )!
+        return (nextData, response)
+    }
+}
+
+@MainActor
+private final class MockRecorder: AudioRecording {
+    var started = false
+    var stopReturn: Data = Data("RIFFmock".utf8)
+    func start() throws { started = true }
+    func stop() -> Data { stopReturn }
+}
+
+@MainActor
+private final class MockPaster: TextPasting {
+    var pasted: String?
+    func copyAndPaste(_ text: String) { pasted = text }
+}
+
+// ──────────────── synchronous tests ────────────────
+
+private func runSync() {
+    group("ReplacementsEngine")
     let r1 = ReplacementRule(pattern: "claude", replacement: "Cortana")
     check("plain case insensitive",
           ReplacementsEngine.apply("Ask Claude please", rules: [r1]) == "Ask Cortana please")
-
     let r2 = ReplacementRule(pattern: "Claude", replacement: "Cortana", caseSensitive: true)
     check("plain case sensitive skips mismatch",
           ReplacementsEngine.apply("ask claude please", rules: [r2]) == "ask claude please")
-
     let ordered = [
         ReplacementRule(pattern: "TODO", replacement: "DONE"),
         ReplacementRule(pattern: "DONE", replacement: "SHIPPED")
     ]
     check("rules are ordered",
           ReplacementsEngine.apply("TODO list", rules: ordered) == "SHIPPED list")
-
     let disabled = ReplacementRule(pattern: "x", replacement: "y", enabled: false)
     check("disabled rule skipped",
           ReplacementsEngine.apply("xxx", rules: [disabled]) == "xxx")
-
     let regex = ReplacementRule(
         pattern: #"(\d+)\s*dollars"#,
         replacement: #"\$$1"#,
         mode: .regex
     )
-    let regexOut = ReplacementsEngine.apply("It costs 50 dollars and 20 dollars", rules: [regex])
     check("regex captures + template",
-          regexOut == "It costs $50 and $20",
-          "got: \(regexOut)")
-
+          ReplacementsEngine.apply("It costs 50 dollars and 20 dollars", rules: [regex])
+            == "It costs $50 and $20")
     let bad = ReplacementRule(pattern: "(unterminated", replacement: "x", mode: .regex)
     check("invalid regex leaves input",
           ReplacementsEngine.apply("hello", rules: [bad]) == "hello")
-
     let empty = ReplacementRule(pattern: "", replacement: "x")
     check("empty pattern is noop",
           ReplacementsEngine.apply("hello", rules: [empty]) == "hello")
-}
 
-// ──────────────── HotkeyBinding ────────────────
-
-describe("HotkeyBinding") {
+    group("HotkeyBinding")
     let def = HotkeyBinding.default
     check("default is option+space",
           def.displayString.contains("⌥") && def.displayString.contains("Space"))
-
     let cmdShift = HotkeyBinding(
-        keyCode: 0x09, // V
+        keyCode: 0x09,
         modifiers: CGEventFlags.maskCommand.union(.maskShift).rawValue
     )
     check("display order ⇧⌘",
           cmdShift.displayString.contains("⇧") && cmdShift.displayString.contains("⌘"))
-
     let encoded = try? JSONEncoder().encode(def)
     let decoded = encoded.flatMap { try? JSONDecoder().decode(HotkeyBinding.self, from: $0) }
     check("codable roundtrip", decoded == def)
-}
 
-// ──────────────── WAVEncoder ────────────────
-
-describe("WAVEncoder") {
+    group("WAVEncoder")
     let samples: [Int16] = [0, 100, -100, 32000, -32000]
     let data = WAVEncoder.encode(samples: samples, sampleRate: 16000)
-    let header = data.prefix(4)
-    check("starts with RIFF", header == Data("RIFF".utf8))
-    let waveTag = data.subdata(in: 8..<12)
-    check("WAVE tag at offset 8", waveTag == Data("WAVE".utf8))
-    let expectedSize = 44 + samples.count * 2
-    check("total size matches", data.count == expectedSize)
-}
+    check("starts with RIFF", data.prefix(4) == Data("RIFF".utf8))
+    check("WAVE tag at offset 8", data.subdata(in: 8..<12) == Data("WAVE".utf8))
+    check("total size matches", data.count == 44 + samples.count * 2)
 
-// ──────────────── MultipartBuilder ────────────────
-
-describe("MultipartBuilder") {
+    group("MultipartBuilder")
     var mp = MultipartBuilder(boundary: "TEST123")
     mp.appendField(name: "model", value: "whisper-1")
     mp.appendFile(name: "file", filename: "x.wav", mimeType: "audio/wav", data: Data([0x52, 0x49]))
@@ -116,89 +122,110 @@ describe("MultipartBuilder") {
     check("ends with terminator", s.hasSuffix("--TEST123--\r\n"))
 }
 
-// ──────────────── OpenAIClient (mocked transport) ────────────────
+// ──────────────── async OpenAIClient tests ────────────────
 
-private final class StubTransport: HTTPTransport {
-    var nextData: Data = Data()
-    var nextStatus: Int = 200
-    var lastRequest: URLRequest?
-
-    func data(for request: URLRequest) async throws -> (Data, URLResponse) {
-        lastRequest = request
-        let response = HTTPURLResponse(
-            url: request.url!,
-            statusCode: nextStatus,
-            httpVersion: nil,
-            headerFields: nil
-        )!
-        return (nextData, response)
-    }
-}
-
-let group = DispatchGroup()
-group.enter()
-Task {
-    let stub = StubTransport()
-    stub.nextData = #"{"text":"hello world"}"#.data(using: .utf8)!
-    let client = OpenAIClient(transport: stub, apiKeyProvider: { "sk-test" })
+private func runOpenAITests() async {
+    group("OpenAIClient")
     do {
+        let stub = StubTransport()
+        stub.nextData = #"{"text":"hello world"}"#.data(using: .utf8)!
+        let client = OpenAIClient(transport: stub, apiKeyProvider: { "sk-test" })
         let text = try await client.transcribe(wav: Data([0x52, 0x49, 0x46, 0x46]))
-        describe("OpenAIClient") {
-            check("transcribe returns text", text == "hello world")
-            check("Authorization header set",
-                  stub.lastRequest?.value(forHTTPHeaderField: "Authorization") == "Bearer sk-test")
-            check("multipart Content-Type",
-                  (stub.lastRequest?.value(forHTTPHeaderField: "Content-Type") ?? "").hasPrefix("multipart/form-data"))
-        }
+        check("transcribe returns text", text == "hello world")
+        check("Authorization header set",
+              stub.lastRequest?.value(forHTTPHeaderField: "Authorization") == "Bearer sk-test")
+        check("multipart Content-Type",
+              (stub.lastRequest?.value(forHTTPHeaderField: "Content-Type") ?? "").hasPrefix("multipart/form-data"))
     } catch {
-        describe("OpenAIClient") {
-            check("transcribe returns text", false, "threw: \(error)")
-        }
+        check("transcribe returns text", false, "threw: \(error)")
     }
 
+    group("OpenAIClient missing key")
     do {
-        let stub2 = StubTransport()
-        let client2 = OpenAIClient(transport: stub2, apiKeyProvider: { nil })
-        _ = try await client2.transcribe(wav: Data())
-        describe("OpenAIClient missing key") {
-            check("expected throw", false)
-        }
-    } catch let OpenAIError.missingAPIKey {
-        describe("OpenAIClient missing key") {
-            check("throws missingAPIKey", true)
-        }
+        let client = OpenAIClient(transport: StubTransport(), apiKeyProvider: { nil })
+        _ = try await client.transcribe(wav: Data())
+        check("throws missingAPIKey", false)
+    } catch OpenAIError.missingAPIKey {
+        check("throws missingAPIKey", true)
     } catch {
-        describe("OpenAIClient missing key") {
-            check("throws missingAPIKey", false, "got: \(error)")
-        }
+        check("throws missingAPIKey", false, "got: \(error)")
     }
 
+    group("OpenAIClient http error")
     do {
-        let stub3 = StubTransport()
-        stub3.nextStatus = 401
-        stub3.nextData = #"{"error":"unauthorized"}"#.data(using: .utf8)!
-        let client3 = OpenAIClient(transport: stub3, apiKeyProvider: { "sk-test" })
-        _ = try await client3.transcribe(wav: Data())
-        describe("OpenAIClient http error") {
-            check("expected throw", false)
-        }
+        let stub = StubTransport()
+        stub.nextStatus = 401
+        stub.nextData = #"{"error":"unauthorized"}"#.data(using: .utf8)!
+        let client = OpenAIClient(transport: stub, apiKeyProvider: { "sk-test" })
+        _ = try await client.transcribe(wav: Data())
+        check("expected throw", false)
     } catch let OpenAIError.http(status, body) {
-        describe("OpenAIClient http error") {
-            check("401 surfaces", status == 401)
-            check("body included", body.contains("unauthorized"))
-        }
+        check("401 surfaces", status == 401)
+        check("body included", body.contains("unauthorized"))
     } catch {
-        describe("OpenAIClient http error") {
-            check("expected http error", false, "got: \(error)")
-        }
+        check("expected http error", false, "got: \(error)")
     }
-
-    group.leave()
 }
-group.wait()
 
-// ──────────────── summary ────────────────
+// ──────────────── async DictationCoordinator E2E ────────────────
 
-let elapsed = Date().timeIntervalSince(start)
-print(String(format: "\n%d passed, %d failed in %.2fs", passed, failed, elapsed))
-exit(failed == 0 ? 0 : 1)
+@MainActor
+private func runCoordinatorE2E() async {
+    group("DictationCoordinator E2E (mocked transport + recorder + paster)")
+    let stub = StubTransport()
+    stub.nextData = #"{"text":"hello cortana"}"#.data(using: .utf8)!
+    let client = OpenAIClient(transport: stub, apiKeyProvider: { "sk-test" })
+    let tmp = FileManager.default.temporaryDirectory
+        .appendingPathComponent("rep-\(UUID()).json")
+    let store = ReplacementsStore(fileURL: tmp)
+    store.upsert(ReplacementRule(pattern: "cortana", replacement: "Cortana"))
+    let recorder = MockRecorder()
+    let paster = MockPaster()
+    let coord = DictationCoordinator(
+        recorder: recorder,
+        replacements: store,
+        client: client,
+        paster: paster,
+        settings: DictationSettings()
+    )
+
+    check("initial state is idle", coord.state == .idle)
+    coord.startRecording()
+    check("startRecording sets state to recording", coord.state == .recording)
+    check("recorder was started", recorder.started)
+    coord.finishRecording()
+    check("finishRecording sets state to processing", coord.state == .processing)
+
+    var waited = 0
+    while waited < 100 && coord.state != .idle {
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        waited += 1
+    }
+    check("state returns to idle after transcribe", coord.state == .idle,
+          "stuck in \(coord.state) after \(waited * 50)ms")
+    check(
+        "replacement rule applied (cortana → Cortana)",
+        paster.pasted == "hello Cortana",
+        "got: \(paster.pasted ?? "nil")"
+    )
+    check(
+        "OpenAI got the WAV in multipart body",
+        (stub.lastRequest?.value(forHTTPHeaderField: "Content-Type") ?? "")
+            .hasPrefix("multipart/form-data")
+    )
+}
+
+// ──────────────── entry ────────────────
+
+@main
+struct TestRunner {
+    static func main() async {
+        setbuf(stdout, nil)
+        runSync()
+        await runOpenAITests()
+        await runCoordinatorE2E()
+        let elapsed = Date().timeIntervalSince(start)
+        print(String(format: "\n%d passed, %d failed in %.2fs", stats.passed, stats.failed, elapsed))
+        exit(stats.failed == 0 ? 0 : 1)
+    }
+}

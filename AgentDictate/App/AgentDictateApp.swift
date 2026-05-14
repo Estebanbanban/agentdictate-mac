@@ -24,11 +24,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: StatusItemController?
     private var onboardingWindow: NSWindow?
     private var settingsWindow: NSWindow?
+    private var recordingHUD: RecordingHUDWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         statusItem = StatusItemController(coordinator: coordinator) { [weak self] in
             self?.showSettings()
+        }
+        if let audioRecorder = coordinator.recorder as? AudioRecorder {
+            recordingHUD = RecordingHUDWindow(coordinator: coordinator, recorder: audioRecorder)
         }
         configureHotkey()
         observeSettings()
@@ -46,6 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let view = SettingsView()
             .environmentObject(appSettings)
             .environmentObject(replacements)
+            .environmentObject(hotkey)
         let host = NSHostingController(rootView: view)
         let window = NSWindow(contentViewController: host)
         window.title = "AgentDictate Settings"

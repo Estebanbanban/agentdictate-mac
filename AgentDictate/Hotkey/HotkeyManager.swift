@@ -9,7 +9,10 @@ enum HotkeyMode: String, CaseIterable, Codable {
 
 @MainActor
 final class HotkeyManager: ObservableObject {
+    enum Status: String { case uninstalled, active, permissionDenied }
+
     @Published var mode: HotkeyMode = .pushToTalk
+    @Published private(set) var status: Status = .uninstalled
 
     var onPress: () -> Void = {}
     var onRelease: () -> Void = {}
@@ -21,7 +24,8 @@ final class HotkeyManager: ObservableObject {
     private(set) var keyCode: CGKeyCode = CGKeyCode(kVK_Space)
     private(set) var modifierFlags: CGEventFlags = .maskAlternate
 
-    func install() {
+    @discardableResult
+    func install() -> Bool {
         uninstall()
         let mask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue)
         let info = Unmanaged.passUnretained(self).toOpaque()
@@ -32,12 +36,19 @@ final class HotkeyManager: ObservableObject {
             eventsOfInterest: CGEventMask(mask),
             callback: HotkeyManager.cgCallback,
             userInfo: info
-        ) else { return }
+        ) else {
+            status = .permissionDenied
+            NSLog("AgentDictate: CGEvent.tapCreate failed — Input Monitoring likely not granted")
+            return false
+        }
         let source = CFMachPortCreateRunLoopSource(nil, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
         eventTap = tap
         runLoopSource = source
+        status = .active
+        NSLog("AgentDictate: hotkey tap installed (keyCode=\(keyCode), flags=\(modifierFlags.rawValue))")
+        return true
     }
 
     func uninstall() {
@@ -47,11 +58,15 @@ final class HotkeyManager: ObservableObject {
         }
         eventTap = nil
         runLoopSource = nil
+        status = .uninstalled
     }
 
     func setBinding(keyCode: CGKeyCode, flags: CGEventFlags) {
         self.keyCode = keyCode
         self.modifierFlags = flags
+        if status != .active {
+            install()
+        }
     }
 
     fileprivate func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
