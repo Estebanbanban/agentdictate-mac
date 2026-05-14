@@ -1,0 +1,12 @@
+.DS_Store
+*.xcodeproj/
+!project.yml
+.build/
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcworkspace/xcuserdata/
+.swiftpm/
+Package.resolved
+_screenshots/
