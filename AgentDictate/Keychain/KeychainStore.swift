@@ -57,10 +57,38 @@ struct KeychainStore {
             }
             return str
         case errSecItemNotFound:
-            return nil
+            // The entry might be in the user's login keychain but inaccessible
+            // to this process because the ad-hoc signature drifted between
+            // builds. Fall back to /usr/bin/security which has broader access.
+            return cliFallbackRead(account: account)
+        case errSecAuthFailed, -25293:
+            return cliFallbackRead(account: account)
         default:
             throw KeychainError.unexpectedStatus(status)
         }
+    }
+
+    /// Last-resort read via the `security` CLI. Used when in-process access is
+    /// denied due to ad-hoc signature changes between dev builds. Returns nil
+    /// silently on any failure.
+    private func cliFallbackRead(account: String) -> String? {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        task.arguments = ["find-generic-password", "-s", service, "-a", account, "-w"]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = Pipe()
+        do {
+            try task.run()
+            task.waitUntilExit()
+        } catch {
+            return nil
+        }
+        guard task.terminationStatus == 0 else { return nil }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        let raw = String(data: data, encoding: .utf8) ?? ""
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     func delete(_ account: String) throws {

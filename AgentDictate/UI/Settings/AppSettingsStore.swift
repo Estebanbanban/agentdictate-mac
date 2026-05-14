@@ -31,6 +31,9 @@ final class AppSettingsStore: ObservableObject {
     @Published var duckMusic: Bool {
         didSet { defaults.set(duckMusic, forKey: Keys.duckMusic) }
     }
+    @Published var showInDock: Bool {
+        didSet { defaults.set(showInDock, forKey: Keys.showInDock) }
+    }
 
     private let defaults: UserDefaults
 
@@ -51,6 +54,7 @@ final class AppSettingsStore: ObservableObject {
             self.hotkeyBinding = .default
         }
         self.duckMusic = defaults.object(forKey: Keys.duckMusic) as? Bool ?? true
+        self.showInDock = defaults.object(forKey: Keys.showInDock) as? Bool ?? true
     }
 
     private func persistHotkey() {
@@ -79,5 +83,6 @@ final class AppSettingsStore: ObservableObject {
         static let onboardingComplete = "onboarding.complete"
         static let soundEnabled = "sound.enabled"
         static let duckMusic = "music.duck"
+        static let showInDock = "dock.show"
     }
 }

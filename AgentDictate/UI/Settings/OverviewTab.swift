@@ -26,6 +26,19 @@ struct OverviewTab: View {
                     bullet("Text is pasted into the currently-focused app via ⌘V.")
                 }
             }
+            CortanaPanel {
+                Toggle(isOn: $appSettings.showInDock) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("SHOW IN DOCK")
+                            .font(CortanaTheme.Font.display(11))
+                            .tracking(2)
+                            .foregroundStyle(CortanaTheme.Color.cyanSoft)
+                        Text("Disable for menu-bar-only mode. Useful when your menu bar is full.")
+                            .font(CortanaTheme.Font.body(11))
+                            .foregroundStyle(CortanaTheme.Color.textDim)
+                    }
+                }
+            }
             Spacer()
         }
     }

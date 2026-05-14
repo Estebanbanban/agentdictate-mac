@@ -18,7 +18,13 @@ final class AudioRecorder: ObservableObject {
         levels.removeAll(keepingCapacity: true)
 
         let input = engine.inputNode
-        let inputFormat = input.outputFormat(forBus: 0)
+        // Use the input node's INPUT format (hardware-native) — outputFormat can
+        // drift to a different rate after the engine restarts, causing
+        // installTap to throw "Failed to create tap due to format mismatch".
+        // Falling back to nil lets AVAudioEngine pick the native format itself.
+        let nativeFormat = input.inputFormat(forBus: 0)
+        let tapFormat: AVAudioFormat? = nativeFormat.channelCount > 0 ? nativeFormat : nil
+
         guard let target = AVAudioFormat(
             commonFormat: .pcmFormatInt16,
             sampleRate: targetSampleRate,
@@ -28,10 +34,12 @@ final class AudioRecorder: ObservableObject {
             throw NSError(domain: "AudioRecorder", code: 1)
         }
         targetFormat = target
-        converter = AVAudioConverter(from: inputFormat, to: target)
+        if let from = tapFormat {
+            converter = AVAudioConverter(from: from, to: target)
+        }
 
         input.removeTap(onBus: 0)
-        input.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buffer, _ in
+        input.installTap(onBus: 0, bufferSize: 1024, format: tapFormat) { [weak self] buffer, _ in
             self?.handle(buffer: buffer)
         }
         engine.prepare()
@@ -51,8 +59,13 @@ final class AudioRecorder: ObservableObject {
         let rms = computeRMS(buffer)
         Task { @MainActor in self.pushLevel(rms) }
 
+        // Lazily create the converter from the *actual* buffer format — handles
+        // the case where the tap format differed from what we queried upfront.
+        if converter == nil, let target = targetFormat {
+            converter = AVAudioConverter(from: buffer.format, to: target)
+        }
         guard let converter, let targetFormat else { return }
-        let capacity = AVAudioFrameCount(targetFormat.sampleRate) // 1s of target frames as upper bound
+        let capacity = AVAudioFrameCount(targetFormat.sampleRate) // 1s upper bound
         guard let out = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: capacity) else { return }
         var error: NSError?
         var supplied = false

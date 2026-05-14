@@ -28,7 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var recordingHUD: RecordingHUDWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        applyActivationPolicy()
         CortanaFonts.registerAll()
         // Eagerly register with TCC so AgentDictate appears in System Settings
         // → Privacy & Security → Input Monitoring even before the user opens
@@ -45,6 +45,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         observeSettings()
         if !appSettings.onboardingComplete {
             showOnboarding()
+        } else {
+            // Open Settings immediately on launch so the user has visible feedback
+            // that the app started. They can close it; the app stays in menu bar / Dock.
+            showSettings()
         }
     }
 
@@ -79,6 +83,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         onboardingWindow = nil
     }
 
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            // No visible windows — user clicked Dock icon or Cmd-tabbed to us with no UI up.
+            // Show whichever window makes sense for current state.
+            if !appSettings.onboardingComplete {
+                showOnboarding()
+            } else {
+                showSettings()
+            }
+        }
+        return true
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        // If the user activates us (Dock click, Cmd+Tab) with no visible windows, open Settings.
+        let hasWindow = NSApp.windows.contains { $0.isVisible && !$0.title.isEmpty }
+        if !hasWindow {
+            if appSettings.onboardingComplete {
+                showSettings()
+            } else if onboardingWindow == nil {
+                showOnboarding()
+            }
+        }
+    }
+
     private func showOnboarding() {
         let host = NSHostingController(rootView: PermissionsOnboarding { [weak self] in
             self?.completeOnboarding()
@@ -100,7 +129,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func configureHotkey() {
         hotkey.mode = appSettings.hotkeyMode
         let b = appSettings.hotkeyBinding
-        hotkey.setBinding(keyCode: CGKeyCode(b.keyCode), flags: b.flags)
+        hotkey.keyCodeRaw = CGKeyCode(b.keyCode)
+        hotkey.modifierFlagsRaw = b.flags
         hotkey.onPress = { [weak self] in
             guard let self else { return }
             switch self.appSettings.hotkeyMode {
@@ -117,6 +147,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkey.onRelease = { [weak self] in
             self?.coordinator.finishRecording()
         }
+        hotkey.onCancel = { [weak self] in
+            self?.coordinator.cancelRecording()
+        }
         hotkey.install()
     }
 
@@ -130,9 +163,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 self.hotkey.mode = self.appSettings.hotkeyMode
                 let b = self.appSettings.hotkeyBinding
-                self.hotkey.setBinding(keyCode: CGKeyCode(b.keyCode), flags: b.flags)
+                // Don't reinstall the tap — just update binding fields in place.
+                self.hotkey.keyCodeRaw = CGKeyCode(b.keyCode)
+                self.hotkey.modifierFlagsRaw = b.flags
                 self.coordinator.settings = self.appSettings.dictationSettings()
+                self.applyActivationPolicy()
             }
+        }
+    }
+
+    private func applyActivationPolicy() {
+        let policy: NSApplication.ActivationPolicy = appSettings.showInDock ? .regular : .accessory
+        if NSApp.activationPolicy() != policy {
+            NSApp.setActivationPolicy(policy)
         }
     }
 }

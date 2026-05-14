@@ -79,6 +79,17 @@ final class DictationCoordinator: ObservableObject {
         Task { await transcribeAndPaste(wav: wav) }
     }
 
+    /// Aborts the current recording without sending to OpenAI. Used by the Escape key.
+    func cancelRecording() {
+        if state == .recording {
+            _ = recorder.stop()
+        }
+        state = .idle
+        if settings.duckMusicWhileRecording {
+            Task { await musicController?.resumeAndFadeIn() }
+        }
+    }
+
     private func transcribeAndPaste(wav: Data) async {
         do {
             let raw = try await client.transcribe(wav: wav, language: settings.language)

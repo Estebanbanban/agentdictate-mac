@@ -16,6 +16,8 @@ final class HotkeyManager: ObservableObject {
 
     var onPress: () -> Void = {}
     var onRelease: () -> Void = {}
+    /// Optional callback fired when Escape is pressed during a recording.
+    var onCancel: () -> Void = {}
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -23,6 +25,15 @@ final class HotkeyManager: ObservableObject {
 
     private(set) var keyCode: CGKeyCode = CGKeyCode(kVK_Space)
     private(set) var modifierFlags: CGEventFlags = .maskAlternate
+
+    var keyCodeRaw: CGKeyCode {
+        get { keyCode }
+        set { keyCode = newValue }
+    }
+    var modifierFlagsRaw: CGEventFlags {
+        get { modifierFlags }
+        set { modifierFlags = newValue }
+    }
 
     @discardableResult
     func install() -> Bool {
@@ -62,10 +73,16 @@ final class HotkeyManager: ObservableObject {
     }
 
     func setBinding(keyCode: CGKeyCode, flags: CGEventFlags) {
+        let changed = self.keyCode != keyCode || self.modifierFlags != flags
         self.keyCode = keyCode
         self.modifierFlags = flags
+        // Only reinstall if we have no tap yet — once active, the existing tap
+        // reads keyCode/modifierFlags fresh on every event so no reinstall needed.
         if status != .active {
             install()
+        } else if changed {
+            // Binding changed but tap is already running — nothing to do, the
+            // callback reads the new values directly off the manager.
         }
     }
 
@@ -83,9 +100,29 @@ final class HotkeyManager: ObservableObject {
         let manager = Unmanaged<HotkeyManager>.fromOpaque(info).takeUnretainedValue()
         let code = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
         let flags = event.flags.intersection([.maskCommand, .maskAlternate, .maskControl, .maskShift])
+        // Escape (keyCode 53) with no modifiers cancels an in-flight recording.
+        if code == 53 && flags.isEmpty && type == .keyDown {
+            DispatchQueue.main.async { manager.onCancel() }
+            return Unmanaged.passUnretained(event)  // don't consume — let Esc still reach the focused app
+        }
         let mgrKeyCode = manager.keyCode
         let mgrFlags = manager.modifierFlags
-        let matches = code == mgrKeyCode && flags.contains(mgrFlags) && !mgrFlags.isEmpty
+        guard !mgrFlags.isEmpty else { return Unmanaged.passUnretained(event) }
+
+        // keyDown must match keyCode AND modifiers (so we don't fire on a stray
+        // unmodified press of the same physical key).
+        // keyUp matches on keyCode ALONE, because in real keyboard timing the
+        // user often releases the modifier (Shift/Option/etc) before the main
+        // key, and the keyUp event for the main key arrives with empty flags.
+        // Requiring flags on keyUp left users with recordings that never stopped.
+        let codeMatches = (code == mgrKeyCode)
+        let modsMatch = flags.contains(mgrFlags)
+        let matches: Bool
+        switch type {
+        case .keyDown: matches = codeMatches && modsMatch
+        case .keyUp:   matches = codeMatches  // permissive — see comment above
+        default:       matches = false
+        }
         if matches {
             NSLog("AgentDictate: hotkey MATCH type=\(type.rawValue) keyCode=\(code) flags=\(flags.rawValue)")
         }
