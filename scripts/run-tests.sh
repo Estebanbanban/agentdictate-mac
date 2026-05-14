@@ -14,6 +14,7 @@ SOURCES=(
     AgentDictate/Hotkey/HotkeyBinding.swift
     AgentDictate/Audio/WAVEncoder.swift
     AgentDictate/Audio/AudioRecorder.swift
+    AgentDictate/Audio/MusicController.swift
     AgentDictate/OpenAI/OpenAIError.swift
     AgentDictate/OpenAI/MultipartBuilder.swift
     AgentDictate/OpenAI/OpenAIClient.swift

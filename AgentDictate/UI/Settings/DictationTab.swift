@@ -39,6 +39,7 @@ struct DictationTab: View {
                     TextField("Language code (e.g. en, fr, leave blank for auto)", text: $appSettings.language)
                         .textFieldStyle(.roundedBorder)
                     Toggle("Play sound on record start/stop", isOn: $appSettings.soundEnabled)
+                    Toggle("Fade out music while recording (Spotify / Apple Music)", isOn: $appSettings.duckMusic)
                 }
             }
             CortanaPanel {

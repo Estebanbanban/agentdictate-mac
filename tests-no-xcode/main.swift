@@ -186,7 +186,9 @@ private func runCoordinatorE2E() async {
         replacements: store,
         client: client,
         paster: paster,
-        settings: DictationSettings()
+        musicController: nil,
+        settings: DictationSettings(),
+        attachDefaultMusicController: false
     )
 
     check("initial state is idle", coord.state == .idle)

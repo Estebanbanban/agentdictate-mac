@@ -33,6 +33,7 @@ final class DictationCoordinator: ObservableObject {
     let replacements: ReplacementsStore
     let client: OpenAIClient
     let paster: TextPasting
+    let musicController: MusicController?
     var settings: DictationSettings
 
     init(
@@ -40,12 +41,21 @@ final class DictationCoordinator: ObservableObject {
         replacements: ReplacementsStore,
         client: OpenAIClient = OpenAIClient(),
         paster: TextPasting = PasteboardPaster(),
-        settings: DictationSettings = DictationSettings()
+        musicController: MusicController? = nil,
+        settings: DictationSettings = DictationSettings(),
+        attachDefaultMusicController: Bool = true
     ) {
         self.recorder = recorder ?? AudioRecorder()
         self.replacements = replacements
         self.client = client
         self.paster = paster
+        if let provided = musicController {
+            self.musicController = provided
+        } else if attachDefaultMusicController {
+            self.musicController = MusicController()
+        } else {
+            self.musicController = nil
+        }
         self.settings = settings
     }
 
@@ -54,6 +64,9 @@ final class DictationCoordinator: ObservableObject {
         do {
             try recorder.start()
             state = .recording
+            if settings.duckMusicWhileRecording {
+                Task { await musicController?.fadeOutAndPause() }
+            }
         } catch {
             state = .error(error.localizedDescription)
         }
@@ -81,8 +94,14 @@ final class DictationCoordinator: ObservableObject {
                 self.paster.copyAndPaste(final)
                 self.state = .idle
             }
+            if settings.duckMusicWhileRecording {
+                await musicController?.resumeAndFadeIn()
+            }
         } catch {
             await MainActor.run { self.state = .error(error.localizedDescription) }
+            if settings.duckMusicWhileRecording {
+                await musicController?.resumeAndFadeIn()
+            }
         }
     }
 }
@@ -96,4 +115,5 @@ struct DictationSettings {
     do not add information. Return only the cleaned text.
     """
     var language: String? = nil
+    var duckMusicWhileRecording: Bool = true
 }

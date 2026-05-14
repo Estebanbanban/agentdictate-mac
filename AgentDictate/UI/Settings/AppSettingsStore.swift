@@ -28,6 +28,9 @@ final class AppSettingsStore: ObservableObject {
     @Published var hotkeyBinding: HotkeyBinding {
         didSet { persistHotkey() }
     }
+    @Published var duckMusic: Bool {
+        didSet { defaults.set(duckMusic, forKey: Keys.duckMusic) }
+    }
 
     private let defaults: UserDefaults
 
@@ -47,6 +50,7 @@ final class AppSettingsStore: ObservableObject {
         } else {
             self.hotkeyBinding = .default
         }
+        self.duckMusic = defaults.object(forKey: Keys.duckMusic) as? Bool ?? true
     }
 
     private func persistHotkey() {
@@ -60,7 +64,8 @@ final class AppSettingsStore: ObservableObject {
             cleanupEnabled: cleanupEnabled,
             cleanupModel: cleanupModel,
             cleanupPrompt: cleanupPrompt,
-            language: language.isEmpty ? nil : language
+            language: language.isEmpty ? nil : language,
+            duckMusicWhileRecording: duckMusic
         )
     }
 
@@ -73,5 +78,6 @@ final class AppSettingsStore: ObservableObject {
         static let language = "transcribe.language"
         static let onboardingComplete = "onboarding.complete"
         static let soundEnabled = "sound.enabled"
+        static let duckMusic = "music.duck"
     }
 }
