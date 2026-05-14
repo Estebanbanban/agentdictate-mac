@@ -73,6 +73,8 @@ struct DictationTab: View {
                 .font(CortanaTheme.Font.body(11))
                 .foregroundStyle(CortanaTheme.Color.textDim)
             Spacer()
+            Button("Refresh") { hotkey.refreshStatus() }
+                .buttonStyle(.borderless)
             if hotkey.status == .permissionDenied {
                 Button("Open Input Monitoring") {
                     if let url = URL(string: SystemSettingsPane.inputMonitoring.urlString) {
@@ -84,6 +86,10 @@ struct DictationTab: View {
                 Button("Reinstall") { hotkey.install() }
                     .buttonStyle(.borderless)
             }
+        }
+        .onAppear { hotkey.refreshStatus() }
+        .onReceive(Timer.publish(every: 2.0, on: .main, in: .common).autoconnect()) { _ in
+            hotkey.refreshStatus()
         }
     }
 

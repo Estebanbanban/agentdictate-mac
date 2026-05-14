@@ -12,7 +12,11 @@ final class HotkeyManager: ObservableObject {
     enum Status: String { case uninstalled, active, permissionDenied }
 
     @Published var mode: HotkeyMode = .pushToTalk
-    @Published private(set) var status: Status = .uninstalled
+    @Published var status: Status = .uninstalled {
+        didSet {
+            NSLog("AgentDictate: HotkeyManager status -> \(status.rawValue)")
+        }
+    }
 
     var onPress: () -> Void = {}
     var onRelease: () -> Void = {}
@@ -37,7 +41,18 @@ final class HotkeyManager: ObservableObject {
 
     @discardableResult
     func install() -> Bool {
-        uninstall()
+        // Note: we intentionally do NOT call uninstall() here when we already
+        // have a working tap. Re-creating the tap on every binding change /
+        // settings save was racing the OS and occasionally returning nil
+        // (== .permissionDenied) even with the permission granted. The tap
+        // callback reads keyCode / modifierFlags fresh on each event, so a
+        // single long-lived tap is correct.
+        if eventTap != nil {
+            objectWillChange.send()
+            status = .active
+            NSLog("AgentDictate: install() called but tap already live — keeping it")
+            return true
+        }
         let mask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue)
         let info = Unmanaged.passUnretained(self).toOpaque()
         guard let tap = CGEvent.tapCreate(
@@ -48,6 +63,7 @@ final class HotkeyManager: ObservableObject {
             callback: HotkeyManager.cgCallback,
             userInfo: info
         ) else {
+            objectWillChange.send()
             status = .permissionDenied
             NSLog("AgentDictate: CGEvent.tapCreate failed — Input Monitoring likely not granted")
             return false
@@ -57,9 +73,32 @@ final class HotkeyManager: ObservableObject {
         CGEvent.tapEnable(tap: tap, enable: true)
         eventTap = tap
         runLoopSource = source
+        objectWillChange.send()
         status = .active
         NSLog("AgentDictate: hotkey tap installed (keyCode=\(keyCode), flags=\(modifierFlags.rawValue))")
         return true
+    }
+
+    /// Periodic sanity check — `CGEvent.tapIsEnabled` is the source of truth.
+    /// Call this from the UI to refresh `status` so the indicator never lies.
+    func refreshStatus() {
+        guard let tap = eventTap else {
+            if status == .active {
+                objectWillChange.send()
+                status = .uninstalled
+            }
+            return
+        }
+        let enabled = CGEvent.tapIsEnabled(tap: tap)
+        let desired: Status = enabled ? .active : .permissionDenied
+        if status != desired {
+            objectWillChange.send()
+            status = desired
+            if !enabled {
+                // System may have disabled us — re-enable.
+                CGEvent.tapEnable(tap: tap, enable: true)
+            }
+        }
     }
 
     func uninstall() {
