@@ -17,14 +17,15 @@ enum CortanaTheme {
 
     enum Font {
         static func display(_ size: CGFloat, weight: SwiftUI.Font.Weight = .bold) -> SwiftUI.Font {
-            // Orbitron is bundled in step 12 final pass; fall back to rounded SF until then.
-            .system(size: size, weight: weight, design: .rounded)
+            // Bundled Orbitron — registered at app launch via CortanaFonts.registerAll().
+            let name = weight == .regular ? CortanaFonts.orbitronRegular : CortanaFonts.orbitronBold
+            return .custom(name, size: size, relativeTo: .title)
         }
         static func body(_ size: CGFloat = 13, weight: SwiftUI.Font.Weight = .regular) -> SwiftUI.Font {
             .system(size: size, weight: weight, design: .default)
         }
         static func mono(_ size: CGFloat = 12) -> SwiftUI.Font {
-            .system(size: size, weight: .regular, design: .monospaced)
+            .custom(CortanaFonts.jetbrainsMono, size: size, relativeTo: .body)
         }
     }
 

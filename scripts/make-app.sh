@@ -18,9 +18,13 @@ fi
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
-mkdir -p "$APP/Contents/Resources"
+mkdir -p "$APP/Contents/Resources/Fonts"
 
 cp "$EXEC" "$APP/Contents/MacOS/AgentDictate"
+
+if [ -d "$ROOT/AgentDictate/Resources/Fonts" ]; then
+    cp "$ROOT/AgentDictate/Resources/Fonts/"*.ttf "$APP/Contents/Resources/Fonts/" 2>/dev/null || true
+fi
 
 # Substitute build-setting placeholders xcodegen left in Info.plist with literal values.
 python3 - "$INFO_PLIST" "$APP/Contents/Info.plist" <<'PY'
@@ -51,6 +55,9 @@ with open(sys.argv[2], 'wb') as f:
     plistlib.dump(data, f)
 PY
 
-codesign --force --deep --sign - "$APP" >/dev/null
+# Use a stable identifier so the codesign signature is reproducible across
+# rebuilds — this prevents macOS TCC from treating each new build as a new
+# app and re-prompting for Input Monitoring / Accessibility every time.
+codesign --force --deep --sign - --identifier com.luzivog.agentdictate "$APP" >/dev/null
 
 echo "Built $APP"

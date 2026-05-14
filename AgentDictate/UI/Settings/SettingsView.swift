@@ -27,15 +27,17 @@ struct SettingsView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .frame(minWidth: 760, minHeight: 520)
+        .frame(minWidth: 820, minHeight: 540)
     }
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("AGENTDICTATE")
-                .font(CortanaTheme.Font.display(13))
-                .tracking(4)
+                .font(CortanaTheme.Font.display(11))
+                .tracking(3)
                 .foregroundStyle(CortanaTheme.Color.cyanSoft)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
                 .padding(.bottom, 14)
             ForEach(Tab.allCases) { tab in
                 SidebarTabRow(tab: tab, selection: $selection)
@@ -43,7 +45,7 @@ struct SettingsView: View {
             Spacer()
         }
         .padding(20)
-        .frame(width: 200)
+        .frame(width: 230)
     }
 
     @ViewBuilder
@@ -75,9 +77,10 @@ private struct SidebarTabRow: View {
                 Text(isSelected ? "[" : " ")
                     .foregroundStyle(CortanaTheme.Color.cyan.opacity(0.7))
                 Text(tab.title.uppercased())
-                    .font(CortanaTheme.Font.display(12))
-                    .tracking(3)
-                Spacer()
+                    .font(CortanaTheme.Font.display(10))
+                    .tracking(2)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
                 Text(isSelected ? "]" : " ")
                     .foregroundStyle(CortanaTheme.Color.cyan.opacity(0.7))
             }

@@ -1,5 +1,6 @@
 import SwiftUI
 import Carbon.HIToolbox
+import IOKit.hid
 
 @main
 struct AgentDictateApp: App {
@@ -28,6 +29,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        CortanaFonts.registerAll()
+        // Eagerly register with TCC so AgentDictate appears in System Settings
+        // → Privacy & Security → Input Monitoring even before the user opens
+        // onboarding. macOS only lists apps that have actually requested the
+        // permission; just installing a CGEventTap doesn't add them.
+        _ = IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
         statusItem = StatusItemController(coordinator: coordinator) { [weak self] in
             self?.showSettings()
         }

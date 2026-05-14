@@ -28,8 +28,11 @@ targets:
     platform: macOS
     sources:
       - path: AgentDictate
+        excludes:
+          - Resources
     resources:
       - path: AgentDictate/Assets.xcassets
+      - path: AgentDictate/Resources/Fonts
     info:
       path: AgentDictate/Info.plist
       properties:
