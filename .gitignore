@@ -9,4 +9,12 @@ xcuserdata/
 *.xcworkspace/xcuserdata/
 .swiftpm/
 Package.resolved
-_screenshots/
+# Ignore most ad-hoc screenshots; keep the ones referenced by
+# THEME-VERIFICATION.md so the comparison artifacts ship with the repo.
+_screenshots/*
+!_screenshots/reference/
+!_screenshots/01-first-launch.png
+!_screenshots/05-settings.png
+!_screenshots/06-Dictation.png
+!_screenshots/06-OpenAI.png
+!_screenshots/16-after-fire.png
