@@ -4,17 +4,25 @@ import Security
 enum KeychainError: Error, LocalizedError {
     case unexpectedStatus(OSStatus)
     case dataDecodingFailed
+    case ioFailed(String)
 
     var errorDescription: String? {
         switch self {
-        case .unexpectedStatus(let status):
-            return "Keychain error \(status)"
-        case .dataDecodingFailed:
-            return "Keychain value could not be decoded as UTF-8"
+        case .unexpectedStatus(let status): return "Keychain error \(status)"
+        case .dataDecodingFailed: return "Stored value could not be decoded as UTF-8"
+        case .ioFailed(let m): return "Secret store I/O failed: \(m)"
         }
     }
 }
 
+/// File-backed secret store. We do NOT use Keychain on ad-hoc-signed builds
+/// because the signature changes between rebuilds, which invalidates the ACL
+/// and forces the user to re-authenticate on every launch.
+///
+/// Storage: `~/Library/Application Support/AgentDictate/secrets.json`, mode 0600.
+/// On first read for an account, if the file is missing the entry, we attempt a
+/// one-time migration from the legacy keychain via `/usr/bin/security` so the
+/// user does not have to re-enter their key.
 struct KeychainStore {
     let service: String
 
@@ -23,87 +31,84 @@ struct KeychainStore {
     }
 
     func set(_ value: String, for account: String) throws {
-        let data = Data(value.utf8)
-        let query: [String: Any] = baseQuery(account: account)
-        let attributes: [String: Any] = [kSecValueData as String: data]
-
-        let updateStatus = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
-        switch updateStatus {
-        case errSecSuccess:
-            return
-        case errSecItemNotFound:
-            var addQuery = query
-            addQuery[kSecValueData as String] = data
-            addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-            let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
-            guard addStatus == errSecSuccess else { throw KeychainError.unexpectedStatus(addStatus) }
-        default:
-            throw KeychainError.unexpectedStatus(updateStatus)
-        }
+        var dict = try readAll()
+        dict[account] = value
+        try writeAll(dict)
     }
 
     func get(_ account: String) throws -> String? {
-        var query = baseQuery(account: account)
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        let dict = try readAll()
+        if let v = dict[account] { return v }
+        // One-time migration from the legacy keychain entry.
+        if let migrated = legacyKeychainRead(account: account) {
+            var fresh = dict
+            fresh[account] = migrated
+            try? writeAll(fresh)
+            return migrated
+        }
+        return nil
+    }
 
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        switch status {
-        case errSecSuccess:
-            guard let data = result as? Data else { return nil }
-            guard let str = String(data: data, encoding: .utf8) else {
-                throw KeychainError.dataDecodingFailed
-            }
-            return str
-        case errSecItemNotFound:
-            // The entry might be in the user's login keychain but inaccessible
-            // to this process because the ad-hoc signature drifted between
-            // builds. Fall back to /usr/bin/security which has broader access.
-            return cliFallbackRead(account: account)
-        case errSecAuthFailed, -25293:
-            return cliFallbackRead(account: account)
-        default:
-            throw KeychainError.unexpectedStatus(status)
+    func delete(_ account: String) throws {
+        var dict = try readAll()
+        dict.removeValue(forKey: account)
+        try writeAll(dict)
+    }
+
+    // MARK: - Storage
+
+    private var storeURL: URL {
+        let fm = FileManager.default
+        let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
+        let dir = base.appendingPathComponent("AgentDictate", isDirectory: true)
+        if !fm.fileExists(atPath: dir.path) {
+            try? fm.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        }
+        return dir.appendingPathComponent("secrets.json")
+    }
+
+    private func readAll() throws -> [String: String] {
+        let url = storeURL
+        guard FileManager.default.fileExists(atPath: url.path) else { return [:] }
+        let data: Data
+        do { data = try Data(contentsOf: url) } catch { throw KeychainError.ioFailed(error.localizedDescription) }
+        if data.isEmpty { return [:] }
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
+            return [:]
+        }
+        return obj
+    }
+
+    private func writeAll(_ dict: [String: String]) throws {
+        let url = storeURL
+        let data: Data
+        do { data = try JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys]) }
+        catch { throw KeychainError.ioFailed(error.localizedDescription) }
+        // Write atomically, then chmod 0600 so other users on the machine can't read it.
+        do {
+            try data.write(to: url, options: [.atomic])
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        } catch {
+            throw KeychainError.ioFailed(error.localizedDescription)
         }
     }
 
-    /// Last-resort read via the `security` CLI. Used when in-process access is
-    /// denied due to ad-hoc signature changes between dev builds. Returns nil
-    /// silently on any failure.
-    private func cliFallbackRead(account: String) -> String? {
+    /// Reads the legacy keychain entry via `security` CLI. Used once during
+    /// migration so existing users keep their saved key without re-entry.
+    /// Silent on failure — migration is best-effort.
+    private func legacyKeychainRead(account: String) -> String? {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/security")
         task.arguments = ["find-generic-password", "-s", service, "-a", account, "-w"]
         let pipe = Pipe()
         task.standardOutput = pipe
         task.standardError = Pipe()
-        do {
-            try task.run()
-            task.waitUntilExit()
-        } catch {
-            return nil
-        }
+        do { try task.run(); task.waitUntilExit() } catch { return nil }
         guard task.terminationStatus == 0 else { return nil }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        let raw = String(data: data, encoding: .utf8) ?? ""
+        let raw = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
-    }
-
-    func delete(_ account: String) throws {
-        let status = SecItemDelete(baseQuery(account: account) as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw KeychainError.unexpectedStatus(status)
-        }
-    }
-
-    private func baseQuery(account: String) -> [String: Any] {
-        [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
-        ]
     }
 }
 

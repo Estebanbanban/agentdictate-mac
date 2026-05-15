@@ -60,19 +60,23 @@ final class DictationCoordinator: ObservableObject {
     }
 
     func startRecording() {
+        NSLog("AgentDictate: coordinator.startRecording() called (state=\(state))")
         guard state == .idle else { return }
         do {
             try recorder.start()
             state = .recording
+            NSLog("AgentDictate: recorder.start() ok, state -> recording")
             if settings.duckMusicWhileRecording {
                 Task { await musicController?.fadeOutAndPause() }
             }
         } catch {
+            NSLog("AgentDictate: recorder.start() FAILED: \(error.localizedDescription)")
             state = .error(error.localizedDescription)
         }
     }
 
     func finishRecording() {
+        NSLog("AgentDictate: coordinator.finishRecording() called (state=\(state))")
         guard state == .recording else { return }
         let wav = recorder.stop()
         state = .processing

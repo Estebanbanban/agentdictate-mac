@@ -35,6 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // onboarding. macOS only lists apps that have actually requested the
         // permission; just installing a CGEventTap doesn't add them.
         _ = IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
+        StartupDiagnostics.run()
         statusItem = StatusItemController(coordinator: coordinator) { [weak self] in
             self?.showSettings()
         }
@@ -145,7 +146,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         hotkey.onRelease = { [weak self] in
-            self?.coordinator.finishRecording()
+            guard let self else { return }
+            // Only push-to-talk uses keyUp to stop. In toggle mode, the next
+            // keyDown handles stop; firing finishRecording() on every release
+            // collapses toggle into push-to-talk.
+            guard self.appSettings.hotkeyMode == .pushToTalk else { return }
+            self.coordinator.finishRecording()
         }
         hotkey.onCancel = { [weak self] in
             self?.coordinator.cancelRecording()
